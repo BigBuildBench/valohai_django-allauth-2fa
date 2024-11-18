@@ -1,0 +1,99 @@
+name: CI
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+jobs:
+  Lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+      - uses: pre-commit/action@v3.0.0
+  Test:
+    runs-on: ubuntu-20.04
+    strategy:
+      matrix:
+        include:
+          - python-version: "3.8"
+          - python-version: "3.9"
+          - python-version: "3.10"
+          - python-version: "3.10"
+            djangomain: "djangomain"
+          - python-version: "3.11"
+          - python-version: "3.11"
+            djangomain: "djangomain"
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: "Set up Python ${{ matrix.python-version }}"
+        uses: actions/setup-python@v4
+        with:
+          python-version: "${{ matrix.python-version }}"
+          cache: pip
+          cache-dependency-path: |
+            **/requirements*.txt
+            **/setup.cfg
+      - run: pip install -U pip wheel setuptools
+      - run: pip install -U tox tox-gh-actions
+      - if: ${{ matrix.djangomain != 'djangomain' }}
+        name: "Run tox targets for ${{ matrix.python-version }}"
+        env:
+          TOX_SKIP_ENV: ".*djangomain.*"
+        run: "python -m tox"
+      - if: ${{ matrix.djangomain == 'djangomain' }}
+        name: "Run tox targets for ${{ matrix.python-version }} for django main"
+        env:
+          TOX_SKIP_ENV: ".*django[^m].*"
+        run: "python -m tox"
+      - run: |
+          mkdir /tmp/coverage
+          find .tox -type f -name 'coverage*xml' -exec mv '{}' /tmp/coverage ';'
+      - uses: codecov/codecov-action@v3
+        with:
+          directory: /tmp/coverage
+  Build:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            **/requirements*.txt
+            **/setup.cfg
+      - run: pip install -U build
+      - run: python -m build
+      - uses: actions/upload-artifact@v3
+        with:
+          name: dist
+          path: dist/
+  Publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    needs:
+      - Build
+    name: Upload release to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://pypi.org/p/django-allauth-2fa/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: dist
+          path: dist/
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          verbose: true
+          print-hash: true
